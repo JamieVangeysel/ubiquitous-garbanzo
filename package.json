@@ -1,0 +1,19 @@
+{
+  "name": "ubiquitous-garbanzo",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/JamieVangeysel/ubiquitous-garbanzo#readme",
+  "bugs": {
+    "url": "https://github.com/JamieVangeysel/ubiquitous-garbanzo/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JamieVangeysel/ubiquitous-garbanzo.git"
+  },
+  "license": "MIT",
+  "author": "Jamie Vangeysel",
+  "type": "commonjs",
+  "main": "index.ts",
+  "scripts": {
+  }
+}
