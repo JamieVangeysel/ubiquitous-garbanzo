@@ -3,14 +3,20 @@ import readline from 'node:readline'
 
 console.debug = () => {
 }
+console.log = () => {
+}
 
 const csv_header = 'date,state,target-state,temperature,target-temperature,outside-temperature,heat-index'
 const skip_lines = new Set([
   csv_header
   // '2025-08-05 20:07:33,0,0,0,20,0,-2.638888888888887'
 ])
-const max_lines: number = 4
+const max_lines: number = -1
 let lines_read: number = 0
+
+const five_min_agg: { [key: number]: any[] } = {}
+const quarter_hour_agg: { [key: number]: any[] } = {}
+const hour_agg: { [key: number]: any[] } = {}
 
 const rd = readline.createInterface({
   input: fs.createReadStream('./data-log.csv'),
@@ -29,6 +35,56 @@ rd.on('line', onLine)
 
 rd.on('close', () => {
   console.debug('done reading file after ' + (performance.now() - start) + 'ms.')
+
+  console.info('----------------------------------------')
+  console.info('Finished neo-thermostat data analytics')
+  console.info('----------------------------------------')
+  console.debug('five_min_agg: ', five_min_agg)
+  console.debug('quarter_hour_agg: ', quarter_hour_agg)
+  console.debug('hour_agg: ', hour_agg)
+  console.debug('----------------------------------------')
+
+  console.debug('Writing to files...')
+  fs.writeFileSync('./five_min_agg.json', JSON.stringify(five_min_agg))
+  fs.writeFileSync('./quarter_hour_agg.json', JSON.stringify(quarter_hour_agg))
+  fs.writeFileSync('./hour_agg.json', JSON.stringify(hour_agg))
+  console.info('Done writing to files after ' + (performance.now() - start) + 'ms.')
+
+  function analyze(agg: { [key: number]: any[] }, log: string) {
+    fs.writeFileSync(`./${log}.log`, '')
+    for (const key in agg) {
+      let min_temp: number = agg[key]?.reduce((prev: number, cur: ICsvRow) => {
+          return Math.min(prev, cur.temperature)
+        },
+        999999
+      )
+      let max_temp: number = agg[key]?.reduce((prev: number, cur: ICsvRow) => {
+          return Math.max(prev, cur.temperature)
+        },
+        -999999
+      )
+      let delta_c_direction = mode(agg[key]?.reduce((prev, curr) => {
+        prev.push(curr.last_c_direction)
+        return prev
+      }, []))
+      let delta_c_state = mode(agg[key]?.reduce((prev, curr) => {
+        prev.push(curr.last_c_state)
+        return prev
+      }, []))
+      let delta_temperature: number = delta_c_direction === 'up' ? max_temp - min_temp : min_temp - max_temp
+
+      console.debug('date: ' + new Date(+key))
+      console.debug('min_temp: ' + min_temp)
+      console.debug('max_temp: ' + max_temp)
+      console.debug('delta_state: ' + delta_c_direction)
+      console.debug('delta_temperature: ' + delta_temperature)
+      fs.writeFileSync(`./${log}.log`, `${new Date(+key)}: ${delta_c_state} ${delta_c_direction} min(${min_temp}), max(${max_temp}) ${delta_temperature}\n`, { flag: 'a' })
+    }
+  }
+
+  analyze(five_min_agg, 'five-min')
+  analyze(quarter_hour_agg, 'quarter')
+  analyze(hour_agg, 'hour')
 })
 
 function onLine(line: string) {
@@ -38,9 +94,9 @@ function onLine(line: string) {
       header_found = true
     } else if (!skip_lines.has(line)) {
       lines_read++
-      if (max_lines === lines_read) { // header_found
+      if (max_lines > 0 && max_lines === lines_read) { // header_found
         rd.removeListener('line', onLine)
-        setTimeout(() => rd.close(), 1000)
+        setTimeout(() => rd.close(), 100)
       }
       try {
         const row = parseLine(line)
@@ -50,7 +106,6 @@ function onLine(line: string) {
           console.debug('----------------------------------------')
           console.debug(row)
           console.debug('----------------------------------------')
-          // rd.close()
 
           auditRow(row)
         }
@@ -122,6 +177,51 @@ function auditRow(row: ICsvRow) {
     last_c_state = delta_temperature > 0 && row.state === 'on' ? 'heating' : 'drifting'
     last_c_direction = delta_temperature > 0 ? 'up' : 'down'
 
+    // Aggregate data into 5 min 15 min and 1h
+    let five_min_date = roundDownToAmountOfMinutes(5, row.date)
+    let quarter_hour_date = roundDownToAmountOfMinutes(15, row.date)
+    let hourly_date = roundDownToAmountOfMinutes(60, row.date)
+
+    const five_min_key: number = five_min_date.getTime()
+    five_min_agg[five_min_key] ??= []
+    five_min_agg[five_min_key].push({
+      ...row,
+      delta_temperature,
+      delta_target_temperature,
+      delta_outside_temperature,
+      delta_heat_index,
+      last_c_state,
+      last_c_direction
+    })
+    const quarter_hour_key: number = quarter_hour_date.getTime()
+    quarter_hour_agg[quarter_hour_key] ??= []
+    quarter_hour_agg[quarter_hour_key].push({
+      ...row,
+      delta_temperature,
+      delta_target_temperature,
+      delta_outside_temperature,
+      delta_heat_index,
+      last_c_state,
+      last_c_direction
+    })
+    const hour_key: number = quarter_hour_date.getTime()
+    hour_agg[hour_key] ??= []
+    hour_agg[hour_key].push({
+      ...row,
+      delta_temperature,
+      delta_target_temperature,
+      delta_outside_temperature,
+      delta_heat_index,
+      last_c_state,
+      last_c_direction
+    })
+
+    console.debug('----------------------------------------')
+    console.debug('current date: ' + row.date)
+    console.debug('five_min_date: ' + five_min_date)
+    console.debug('quarter_hour_date: ' + quarter_hour_date)
+    console.debug('hourly_date: ' + hourly_date)
+    console.debug('----------------------------------------')
 
     console.debug('delta_temperature: ' + delta_temperature)
     console.debug('delta_target_temperature: ' + delta_target_temperature)
@@ -130,8 +230,8 @@ function auditRow(row: ICsvRow) {
 
     console.debug('----------------------------------------')
 
-    console.info('State & direction: ' + last_c_state + ' ' + last_c_direction)
-    console.info('----------------------------------------')
+    console.log('State & direction: ' + last_c_state + ' ' + last_c_direction)
+    console.log('----------------------------------------')
   }
 
   // Always set first line to false as we are done running the function and update last values
@@ -147,6 +247,33 @@ function updateLastValues(row: ICsvRow) {
   last_target_temperature = row.target_temperature
   last_outside_temperature = row.outside_temperature
   last_heat_index = row.heat_index
+}
+
+function roundDownToAmountOfMinutes(amount_of_minutes: number, date: Date): Date {
+  let coff: number = 1000 * 60 * amount_of_minutes // milliseconds
+  return new Date(Math.floor(date.getTime() / coff) * coff)
+}
+
+function mode(array: any[]) {
+  if (array.length == 0) {
+    return null
+  }
+
+  let modeMap: any = {}
+  let maxEl = array[0], maxCount = 1
+  for (const element of array) {
+    const el = element
+    if (modeMap[el] == null) {
+      modeMap[el] = 1
+    } else {
+      modeMap[el]++
+    }
+    if (modeMap[el] > maxCount) {
+      maxEl = el
+      maxCount = modeMap[el]
+    }
+  }
+  return maxEl
 }
 
 interface ICsvRow {
