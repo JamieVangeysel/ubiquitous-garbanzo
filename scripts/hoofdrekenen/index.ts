@@ -68,10 +68,7 @@ function generateExercises(
         ? `${a}+${b}`
         : `${a}-${b}`
 
-    if (used.has(key)) {
-      console.log(`duplicate: ${a} ${operation} ${b} = ${result}`, used.size)
-      continue
-    }
+    if (used.has(key)) continue
     used.add(key)
 
     exercises.push({
