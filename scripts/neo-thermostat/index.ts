@@ -19,7 +19,7 @@ const quarter_hour_agg: { [key: number]: any[] } = {}
 const hour_agg: { [key: number]: any[] } = {}
 
 const rd = readline.createInterface({
-  input: fs.createReadStream('./data-log.csv'),
+  input: fs.createReadStream('./data-log-default.csv'),
   output: process.stdout,
   terminal: false
 })
@@ -63,12 +63,12 @@ rd.on('close', () => {
         },
         -999999
       )
-      let delta_c_direction = mode(agg[key]?.reduce((prev, curr) => {
-        prev.push(curr.last_c_direction)
+      let delta_state = mode(agg[key]?.reduce((prev, curr) => {
+        prev.push(curr.state)
         return prev
       }, []))
-      let delta_c_state = mode(agg[key]?.reduce((prev, curr) => {
-        prev.push(curr.last_c_state)
+      let delta_c_direction = mode(agg[key]?.reduce((prev, curr) => {
+        prev.push(curr.last_c_direction)
         return prev
       }, []))
       let delta_temperature: number = delta_c_direction === 'up' ? max_temp - min_temp : min_temp - max_temp
@@ -78,7 +78,14 @@ rd.on('close', () => {
       console.debug('max_temp: ' + max_temp)
       console.debug('delta_state: ' + delta_c_direction)
       console.debug('delta_temperature: ' + delta_temperature)
-      fs.writeFileSync(`./${log}.log`, `${new Date(+key)}: ${delta_c_state} ${delta_c_direction} min(${min_temp}), max(${max_temp}) ${delta_temperature}\n`, { flag: 'a' })
+
+      let last_c_state = 'drifting'
+      if (delta_state === 'on') {
+        last_c_state = delta_temperature > 0 ? 'heating' : 'heating but drifting'
+      }
+      const last_c_direction = delta_temperature > 0 ? 'up' : 'down'
+
+      fs.writeFileSync(`./${log}.log`, `${new Date(+key)}: ${last_c_state} ${last_c_direction} min(${min_temp}), max(${max_temp}) ${delta_temperature}\n`, { flag: 'a' })
     }
   }
 
@@ -168,13 +175,19 @@ function auditRow(row: ICsvRow) {
     throw new Error('temperature is 0')
   }
 
+  logStateChange(row)
+
   if (!first_line) {
     // compare values with the previous line
     const delta_temperature: number = row.temperature - last_temperature
     const delta_target_temperature: number = row.target_temperature - last_target_temperature
     const delta_outside_temperature: number = row.outside_temperature - last_outside_temperature
     const delta_heat_index: number = row.heat_index - last_heat_index
-    last_c_state = delta_temperature > 0 && row.state === 'on' ? 'heating' : 'drifting'
+    if (row.state === 'on') {
+      last_c_state = delta_temperature > 0 ? 'heating' : 'heating but drifting'
+    } else {
+      last_c_state = 'drifting'
+    }
     last_c_direction = delta_temperature > 0 ? 'up' : 'down'
 
     // Aggregate data into 5 min 15 min and 1h
@@ -249,6 +262,31 @@ function updateLastValues(row: ICsvRow) {
   last_heat_index = row.heat_index
 }
 
+let last_state_change: Date
+let _last_state: string
+let _last_target_temperature: number
+
+fs.writeFileSync('./state.log', '')
+
+function logStateChange(row: ICsvRow) {
+  let message: string = `${row.date.toUTCString()}: `
+  message += row.state === 'on' ? 'heating has started' : 'heating is off'
+
+  if (!_last_state) {
+    fs.writeFileSync('./state.log', message + '\n', { flag: 'a' })
+    _last_state = row.state
+    last_state_change = row.date
+  } else if (_last_state !== row.state) {
+    if (_last_state === 'on') {
+      message = `${row.date.toUTCString()}: heating has stopped`
+    }
+    message += ' after ' + ((row.date.getTime() - last_state_change.getTime()) / 1000) + 's'
+    fs.writeFileSync('./state.log', message + '\n', { flag: 'a' })
+    _last_state = row.state
+    last_state_change = row.date
+  }
+}
+
 function roundDownToAmountOfMinutes(amount_of_minutes: number, date: Date): Date {
   let coff: number = 1000 * 60 * amount_of_minutes // milliseconds
   return new Date(Math.floor(date.getTime() / coff) * coff)
@@ -288,5 +326,5 @@ interface ICsvRow {
 
 type TState = 'on' | 'off'
 
-type CState = 'heating' | 'drifting'
+type CState = 'heating' | 'drifting' | 'heating but drifting'
 type CDirection = 'up' | 'down'
