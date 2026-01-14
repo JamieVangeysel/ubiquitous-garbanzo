@@ -22,17 +22,6 @@ if (!fs.existsSync('./exercises')) {
   fs.mkdirSync('./exercises')
 }
 
-function requiresRegrouping(a: number, b: number, operation: Operation): boolean {
-  switch (operation) {
-    case 'add':
-      return (a % 10) + (b % 10) >= 10
-    case 'subtract':
-      return (a % 10) < (b % 10)
-    default:
-      return false // not relevant for * and /
-  }
-}
-
 function assertRegroupingAllowed(maxResult: number): void {
   if (maxResult >= 1000) {
     throw new Error('Regrouping / borrowing only supported for maxResult < 1000')
@@ -58,19 +47,27 @@ function countAdditionWithoutRegrouping(maxResult: number): number {
 }
 
 function countSubtractionWithBorrowing(maxResult: number): number {
-  return (maxResult * (maxResult + 1)) / 2
+  return (maxResult * (maxResult - 1)) / 2
 }
 
 function countSubtractionWithoutBorrowing(maxResult: number): number {
   assertRegroupingAllowed(maxResult)
 
   let count = 0
+
   for (let a = 1; a <= maxResult; a++) {
-    for (let b = 1; b <= a; b++) {
+    for (let b = 1; b < a; b++) {
+      // no borrowing in ones place
       if ((a % 10) < (b % 10)) continue
+
+      // result must be >= 1 and <= maxResult
+      const result = a - b
+      if (result < 1 || result > maxResult) continue
+
       count++
     }
   }
+
   return count
 }
 
@@ -115,112 +112,187 @@ function maxUniqueCombinations(
 }
 
 
-function generateExercises(
-  count: number,
-  maxResult: number,
-  operation: Operation,
-  allowRegrouping: boolean
-): Exercise[] {
-  const exercises: Exercise[] = []
-  const used = new Set<string>()
-  const maxUnique = maxUniqueCombinations(maxResult, operation, allowRegrouping)
-  console.log(`maxUnique: ${maxUnique}`)
+function requiresAdditionRegrouping(a: number, b: number): boolean {
+  return (a % 10) + (b % 10) >= 10
+}
 
-  while (exercises.length < count) {
-    if (used.size >= maxUnique) {
-      used.clear() // reset and keep going
-    }
-
-    let a: number
-    let b: number
-    let result: number
-
-    if (operation === 'add') {
-      result = randomInt(2, maxResult)
-      a = randomInt(1, result - 1)
-      b = result - a
-    } else {
-      result = randomInt(0, maxResult)
-      b = randomInt(1, maxResult - result)
-      a = result + b
-    }
-
-    const regroupingNeeded = requiresRegrouping(a, b, operation)
-    if (!allowRegrouping && regroupingNeeded)
-      continue
-
-    const key =
-      operation === 'add'
-        ? `${a}+${b}`
-        : `${a}-${b}`
-
-    if (used.has(key)) {
-      // console.log(`skipping ${key} because it was already used`, used.size, maxUnique)
-      continue
-    }
-    used.add(key)
-
-    exercises.push({
-      a,
-      b,
-      operation,
-      result,
-      requiresRegrouping: regroupingNeeded
-    })
-  }
-
-  return exercises
+function requiresSubtractionBorrowing(a: number, b: number): boolean {
+  return (a % 10) < (b % 10)
 }
 
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-interface iConfig {
+function generateAdditionOperands(
+  maxResult: number,
+  allowRegrouping: boolean
+): { a: number; b: number; result: number; requiresRegrouping: boolean } {
+  const result = randomInt(2, maxResult)
+  const a = randomInt(1, result - 1)
+  const b = result - a
+  const regroup = requiresAdditionRegrouping(a, b)
+
+  if (!allowRegrouping && regroup) {
+    throw new Error('regrouping')
+  }
+
+  return { a, b, result, requiresRegrouping: regroup }
+}
+
+function generateSubtractionOperands(
+  maxResult: number,
+  allowRegrouping: boolean
+): { a: number; b: number; result: number; requiresRegrouping: boolean } {
+  const result = randomInt(1, maxResult - 1)
+  const b = randomInt(1, maxResult - result)
+  const a = result + b
+  const borrow = requiresSubtractionBorrowing(a, b)
+
+  if (!allowRegrouping && borrow) {
+    throw new Error('borrowing')
+  }
+
+  return { a, b, result, requiresRegrouping: borrow }
+}
+
+function generateExercises(
+  count: number,
+  maxResult: number,
+  operations: Operation[],
+  allowRegrouping: boolean
+): Exercise[] {
+  const exercises: Exercise[] = []
+
+  const used = new Map<Operation, Set<string>>()
+  const maxUnique = new Map<Operation, number>()
+
+  for (const op of operations) {
+    used.set(op, new Set())
+    console.log(maxUniqueCombinations(maxResult, op, allowRegrouping))
+    maxUnique.set(op, maxUniqueCombinations(maxResult, op, allowRegrouping))
+  }
+
+  console.log(`maxUnique: ${JSON.stringify(maxUnique)}`)
+
+  let activeOperations = [...operations]
+
+  while (exercises.length < count) {
+    // all operations exhausted → reset everything
+    if (activeOperations.length === 0) {
+      for (const op of operations) {
+        used.get(op)!.clear()
+      }
+      activeOperations = [...operations]
+    }
+
+    const operation =
+      activeOperations[randomInt(0, activeOperations.length - 1)] ?? 'add'
+
+    const usedSet = used.get(operation)!
+    const opMax = maxUnique.get(operation)!
+
+    let data
+    try {
+      data =
+        operation === 'add'
+          ? generateAdditionOperands(maxResult, allowRegrouping)
+          : generateSubtractionOperands(maxResult, allowRegrouping)
+    } catch {
+      continue
+    }
+
+    const key = `${data.a}${operation}${data.b}`
+
+    if (usedSet.has(key)) {
+      // operation exhausted → remove from active pool
+      if (usedSet.size >= opMax) {
+        activeOperations = activeOperations.filter(op => op !== operation)
+      }
+      continue
+    }
+
+    usedSet.add(key)
+
+    // operation just got exhausted
+    if (usedSet.size >= opMax) {
+      activeOperations = activeOperations.filter(op => op !== operation)
+    }
+
+    exercises.push({
+      a: data.a,
+      b: data.b,
+      operation,
+      result: data.result,
+      requiresRegrouping: data.requiresRegrouping
+    })
+  }
+
+  return exercises
+}
+
+interface IConfig {
   name: string,
   count: number,
   max: number,
-  operator: Operation,
+  operator: Operation[],
   allow_regrouping: boolean
 }
 
-const configs: iConfig[] = [
-  { name: 'Plus tot 10', count: 100, max: 10, operator: 'add', allow_regrouping: true }
-  , { name: 'Min tot 10', count: 100, max: 10, operator: 'subtract', allow_regrouping: true }
-  , { name: 'Plus tot 20', count: 200, max: 20, operator: 'add', allow_regrouping: false }
+const configs: IConfig[] = [
+  { name: 'Plus tot 10', count: 100, max: 10, operator: ['add'], allow_regrouping: true }
+  , { name: 'Min tot 10', count: 100, max: 10, operator: ['subtract'], allow_regrouping: true }
+  , { name: 'Plus en min tot 10', count: 100, max: 10, operator: ['add', 'subtract'], allow_regrouping: true }
+  , {
+    name: 'Plus en min tot 20 (zonder brug)',
+    count: 100,
+    max: 20,
+    operator: ['add', 'subtract'],
+    allow_regrouping: false
+  }
+  , {
+    name: 'Plus en min tot 20 (met brug)',
+    count: 100,
+    max: 20,
+    operator: ['add', 'subtract'],
+    allow_regrouping: true
+  }
+  , { name: 'Plus en min tot 100', count: 100, max: 100, operator: ['add', 'subtract'], allow_regrouping: true }
+  , { name: 'Plus en min tot 1000', count: 100, max: 1000, operator: ['add', 'subtract'], allow_regrouping: true }
+  , { name: 'Plus tot 20', count: 200, max: 20, operator: ['add'], allow_regrouping: true }
   , {
     name: 'Plus tot 100 (zonder brug)',
     count: 100,
     max: 100,
-    operator: 'add',
+    operator: ['add'],
     allow_regrouping: false
   }
   , {
-    name: 'Plus tot 100 met (brug)',
+    name: 'Plus tot 100 (met brug)',
     count: 100,
     max: 100,
-    operator: 'add',
+    operator: ['add'],
     allow_regrouping: true
   }
   , {
     name: 'Plus tot 1.000',
     count: 100,
     max: 1000,
-    operator: 'add',
+    operator: ['add'],
     allow_regrouping: true
   }
   , {
     name: 'Plus tot 10.000',
     count: 100,
     max: 10000,
-    operator: 'add',
+    operator: ['add'],
     allow_regrouping: true
   }
   , {
     name: 'Plus tot 1.000.000',
     count: 100,
     max: 1000000,
-    operator: 'add',
+    operator: ['add'],
     allow_regrouping: true
   }
 ]
@@ -233,7 +305,7 @@ for (const config of configs) {
 }
 console.log(`created all exercises pdf's in ${performance.now() - start}ms`)
 
-async function createExercisesPdf(config: iConfig, with_solution: boolean = false) {
+async function createExercisesPdf(config: IConfig, with_solution: boolean = false) {
   const exercises: Exercise[] = generateExercises(config.count, config.max, config.operator, config.allow_regrouping)
 
   await generatePdf(exercises, config, false)
@@ -242,7 +314,7 @@ async function createExercisesPdf(config: iConfig, with_solution: boolean = fals
   }
 }
 
-async function generatePdf(exercises: Exercise[], config: iConfig, with_solution: boolean = false) {
+async function generatePdf(exercises: Exercise[], config: IConfig, with_solution: boolean = false) {
   // Create a new PDFDocument
   let pdfDoc: PDFDocument | undefined = await PDFDocument.create()
   pdfDoc.registerFontkit(fontkit)
@@ -254,8 +326,8 @@ async function generatePdf(exercises: Exercise[], config: iConfig, with_solution
   pdfDoc.setSubject('Hoofdrekenen')
 
   //
-  const courierFont = await pdfDoc.embedFont(fontBytes)
-  // const courierFont = await pdfDoc.embedFont(StandardFonts.Courier)
+  // const courierFont = await pdfDoc.embedFont(fontBytes)
+  const courierFont = await pdfDoc.embedFont(StandardFonts.Courier)
   const courierFontBold = await pdfDoc.embedFont(StandardFonts.CourierBold)
 
   // Add a blank page to the document
@@ -375,7 +447,7 @@ function getGridPosition(
   }
 }
 
-function getLongestExercise(exercises: Exercise[], config: iConfig) {
+function getLongestExercise(exercises: Exercise[], config: IConfig) {
   return exercises.reduce((prev: number, curr: Exercise): number => {
     if (prev < writeExerciseText(config, curr).length) {
       return writeExerciseText(config, curr).length
@@ -384,8 +456,11 @@ function getLongestExercise(exercises: Exercise[], config: iConfig) {
   }, 0)
 }
 
-function writeExerciseText(config: iConfig, e: Exercise, hide_result: boolean = false) {
-  const max_string_length: number = (config.max - 1).toString().length
+function writeExerciseText(config: IConfig, e: Exercise, hide_result: boolean = false) {
+  let max_string_length: number = (config.max - 1).toString().length
+  if (config.operator.includes('subtract')) {
+    max_string_length = config.max.toString().length
+  }
 
   let a: string = e.a.toString().padStart(max_string_length, ' ')
   let b: string = e.b.toString().padStart(max_string_length, ' ')
