@@ -273,6 +273,7 @@ function logStateChange(row: ICsvRow) {
   message += row.state === 'on' ? 'heating has started' : 'heating is off'
 
   if (!_last_state) {
+    message += ` (outside temperature: ${row.outside_temperature})`
     fs.writeFileSync('./state.log', message + '\n', { flag: 'a' })
     _last_state = row.state
     last_state_change = row.date
@@ -280,11 +281,40 @@ function logStateChange(row: ICsvRow) {
     if (_last_state === 'on') {
       message = `${row.date.toUTCString()}: heating has stopped`
     }
-    message += ' after ' + ((row.date.getTime() - last_state_change.getTime()) / 1000) + 's'
+    message += ' after ' + formatSeconds((row.date.getTime() - last_state_change.getTime()) / 1000)
+    message += ` (outside temperature: ${row.outside_temperature})`
     fs.writeFileSync('./state.log', message + '\n', { flag: 'a' })
     _last_state = row.state
     last_state_change = row.date
   }
+}
+
+function formatSeconds(amount_of_seconds: number) {
+  let formatted: string = ''
+  if (amount_of_seconds >= 86400 * 7) {
+    // weeks
+    let weeks: number = Math.floor(amount_of_seconds / 86400 * 7)
+    formatted += weeks + 'w, '
+  }
+  if (amount_of_seconds >= 86400) {
+    // days
+    let days: number = Math.floor(amount_of_seconds / 86400)
+    formatted += days + 'd, '
+  }
+  if (amount_of_seconds >= 3600) {
+    // hours
+    let hours: number = Math.floor(amount_of_seconds / 3600)
+    formatted += hours + 'h, '
+  }
+  if (amount_of_seconds >= 60) {
+    // minutes
+    let minutes: number = Math.floor((amount_of_seconds % 3600) / 60)
+    formatted += minutes + 'm, '
+  }
+  // seconds
+  let seconds: number = Math.floor(amount_of_seconds % 60)
+  formatted += seconds + 's'
+  return formatted
 }
 
 function roundDownToAmountOfMinutes(amount_of_minutes: number, date: Date): Date {
