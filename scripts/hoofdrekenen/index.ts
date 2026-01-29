@@ -2,7 +2,8 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import * as fs from 'node:fs'
 import fontkit from '@pdf-lib/fontkit'
 
-type Operation = 'add' | 'subtract' | 'multiply' | 'divide'
+import type { Operation } from './config.ts'
+import { config as configs } from './config.ts'
 
 const rows = 5
 const cols = 4
@@ -55,8 +56,8 @@ function countSubtractionWithoutBorrowing(maxResult: number): number {
 
   let count = 0
 
-  for (let a = 1; a <= maxResult; a++) {
-    for (let b = 1; b < a; b++) {
+  for (let a: number = 1; a <= maxResult; a++) {
+    for (let b: number = 1; b < a; b++) {
       // no borrowing in ones place
       if ((a % 10) < (b % 10)) continue
 
@@ -239,64 +240,6 @@ interface IConfig {
   allow_regrouping: boolean
 }
 
-const configs: IConfig[] = [
-  { name: 'Plus tot 10', count: 100, max: 10, operator: ['add'], allow_regrouping: true }
-  , { name: 'Min tot 10', count: 100, max: 10, operator: ['subtract'], allow_regrouping: true }
-  , { name: 'Plus en min tot 10', count: 100, max: 10, operator: ['add', 'subtract'], allow_regrouping: true }
-  , {
-    name: 'Plus en min tot 20 (zonder brug)',
-    count: 100,
-    max: 20,
-    operator: ['add', 'subtract'],
-    allow_regrouping: false
-  }
-  , {
-    name: 'Plus en min tot 20 (met brug)',
-    count: 100,
-    max: 20,
-    operator: ['add', 'subtract'],
-    allow_regrouping: true
-  }
-  , { name: 'Plus en min tot 100', count: 100, max: 100, operator: ['add', 'subtract'], allow_regrouping: true }
-  , { name: 'Plus en min tot 1000', count: 100, max: 1000, operator: ['add', 'subtract'], allow_regrouping: true }
-  , { name: 'Plus tot 20', count: 200, max: 20, operator: ['add'], allow_regrouping: true }
-  , {
-    name: 'Plus tot 100 (zonder brug)',
-    count: 100,
-    max: 100,
-    operator: ['add'],
-    allow_regrouping: false
-  }
-  , {
-    name: 'Plus tot 100 (met brug)',
-    count: 100,
-    max: 100,
-    operator: ['add'],
-    allow_regrouping: true
-  }
-  , {
-    name: 'Plus tot 1.000',
-    count: 100,
-    max: 1000,
-    operator: ['add'],
-    allow_regrouping: true
-  }
-  , {
-    name: 'Plus tot 10.000',
-    count: 100,
-    max: 10000,
-    operator: ['add'],
-    allow_regrouping: true
-  }
-  , {
-    name: 'Plus tot 1.000.000',
-    count: 100,
-    max: 1000000,
-    operator: ['add'],
-    allow_regrouping: true
-  }
-]
-
 const start = performance.now()
 for (const config of configs) {
   const start_ex = performance.now()
@@ -325,7 +268,6 @@ async function generatePdf(exercises: Exercise[], config: IConfig, with_solution
   pdfDoc.setTitle(config.name + with_solution ? ' OPLOSSING' : '', { showInWindowTitleBar: true })
   pdfDoc.setSubject('Hoofdrekenen')
 
-  //
   // const courierFont = await pdfDoc.embedFont(fontBytes)
   const courierFont = await pdfDoc.embedFont(StandardFonts.Courier)
   const courierFontBold = await pdfDoc.embedFont(StandardFonts.CourierBold)
@@ -440,6 +382,7 @@ function getGridPosition(
   blocksPerPage = 5
 ): { row: number; block: number; col: number } {
   let row = Math.floor(index / columnsPerRow)
+
   return {
     row,
     block: Math.floor(row / blocksPerPage),
@@ -458,6 +401,7 @@ function getLongestExercise(exercises: Exercise[], config: IConfig) {
 
 function writeExerciseText(config: IConfig, e: Exercise, hide_result: boolean = false) {
   let max_string_length: number = (config.max - 1).toString().length
+
   if (config.operator.includes('subtract')) {
     max_string_length = config.max.toString().length
   }
@@ -472,7 +416,14 @@ function getOperationSymbol(operation: Operation) {
   switch (operation) {
     case 'add':
       return '+'
+
     case 'subtract':
       return '-'
+
+    case 'multiply':
+      return '*'
+
+    case 'divide':
+      return '/'
   }
 }

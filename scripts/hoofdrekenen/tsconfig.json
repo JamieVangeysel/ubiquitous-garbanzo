@@ -38,6 +38,7 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "noUncheckedSideEffectImports": true,
+    "allowImportingTsExtensions": true,
     "moduleDetection": "force",
     "skipLibCheck": true
   }
